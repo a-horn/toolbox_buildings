@@ -1,0 +1,114 @@
+---
+title: "A tool box for a climate neutral housing sector: Climate Goals"
+date: "`r Sys.Date()`"
+output:
+  pdf_document:
+    number_sections: yes
+  html_document:
+    df_print: paged
+    number_sections: yes
+editor_options: 
+  markdown: 
+    wrap: 72
+author:   
+  - Anna Hornykewycz^[Institute for Comprehensive Analysis of the Economy (ICAE),
+                  Johannes Kepler University, Linz, Austria]
+  - Jakob Kapeller^[Institute for Socio-Economics, University of Duisburg-Essen, 
+                  Germany and
+                  Institute for Comprehensive Analysis of the Economy (ICAE),
+                  Johannes Kepler University, Linz, Austria]
+  - Jan David Weber^[Institute for Socio-Economics, University of Duisburg-Essen, 
+                  Germany]
+  - Bernhard Schütz^[Vienna Institute for International Economic Comparisions (wiiw)
+                  and Institute for Socio-Economics, University of Duisburg-Essen, 
+                  Germany]
+  - Lukas Cserjan^[Institute for Comprehensive Analysis of the Economy (ICAE),
+                  Johannes Kepler University, Linz, Austria]
+---
+
+
+# Defining relative reduction goals
+
+Reduction goals are typically defined relative to a certain base year and set 
+relative reduction targets for specific periods (for the \textit{German case} 
+the base year is 1990, whereas targets are defined for milestones in 2030, 2040 
+and 2050). Specifically, we formulate our climate goal estiamtes on the basis of 
+the [Federal Climate Change Act (KSG)](https://www.gesetze-im-internet.de/englisch_ksg/index.html).
+\footnote{We use Appendix I to construct the goal for 2030, while basing the 
+goals for 2040 and 2050 on Appendix II.}
+
+In doing so, we also adjust for current emissions to 
+rescale targets to more accurately reflect contemporary needs for emission 
+reduction. In this version, we use recent data to account for current emissions
+(see [here](https://www.umweltbundesamt.de/presse/pressemitteilungen/klimaemissionen-sinken-2023-um-101-prozent) for more details); however, extrapolating the trend from 1990 onwards would 
+give very similar results.
+
+```{r climate_goals_parameters}
+emissions_buildings_1990 = 210
+goal_2030 = -(emissions_buildings_1990-67)/emissions_buildings_1990
+goal_2040 = -0.88
+goal_2050 = -1.00
+emissions_buildings_2023 = 102 
+
+target_2030 = emissions_buildings_1990 * (1 + goal_2030) 
+target_2040 = emissions_buildings_1990 * (1 + goal_2040) 
+target_2050 = emissions_buildings_1990 * (1 + goal_2050)
+
+global_targetsinpercent <- c(0,
+                      1 - target_2030 / emissions_buildings_2023,
+                      1 - target_2040 / emissions_buildings_2023,
+                      1 - target_2050 / emissions_buildings_2023)
+
+```
+
+# Extrapolation between targets
+
+In this section we linearly extrapolate targets to generate an exhaustive 
+time-series.
+
+```{r calculating_time_series}
+start_year = 2023
+end_year = 2050
+
+target_1 = 2030
+target_2 = 2040
+target_3 = end_year
+
+globalscenario <- matrix(NA, end_year-start_year+1, 2) 
+for (i in start_year:end_year) {
+  if (i <= target_1) {
+    globalscenario[i-start_year+1, ] <- c(i, (global_targetsinpercent[2] - 
+                                    global_targetsinpercent[1]) / 
+                                    (target_1 - start_year) * (i - start_year))
+  } else if (i <= target_2) {
+    globalscenario[i-start_year+1, ] <- c(i, global_targetsinpercent[2] + 
+                                    (global_targetsinpercent[3] - 
+                                     global_targetsinpercent[2]) / 
+                                     (target_2 - target_1) * (i - target_1))
+  } else if (i <= target_3) {
+    globalscenario[i-start_year+1, ] <- c(i, global_targetsinpercent[3] + 
+                                    (global_targetsinpercent[4] - 
+                                     global_targetsinpercent[3]) / 
+                                     (target_3 - target_2) * (i - target_2))
+  }
+}
+
+globalscenario <- as.data.frame(globalscenario)
+colnames(globalscenario) <- c("year", "rel_saving")
+globalscenario$rel_reduction <- 1 - globalscenario$rel_saving
+```
+
+# Exporting the generated time series for further processing.
+
+For file management, we make use of the `here`-package. PLease make sure to 
+install this package and verify, whether the correct path is obtained.
+
+```{r export_climate_goals, message=FALSE, results="hide"}
+library(here)
+here::here()
+write.csv(globalscenario, 
+          here::here("Intermediate_Results/global_buildings_climate_goals2040.csv"), 
+          row.names = FALSE)
+
+```
+

@@ -1,0 +1,361 @@
+---
+title: "A tool box for a climate neutral housing sector: Compiling and comparing results for different renovation rates"
+
+output:
+  pdf_document:
+    number_sections: yes
+  html_document:
+    df_print: paged
+    number_sections: yes
+date: "`r Sys.Date()`"
+author: 
+- Anna Hornykewycz^[Institute for Comprehensive Analysis of the Economy (ICAE), Johannes
+  Kepler University, Linz, Austria]
+- "Jakob Kapeller^[Institute for Socio-Economics, University of Duisburg-Essen, Germany
+  and Institute for Comprehensive Analysis of the Economy (ICAE), Johannes Kepler
+  University, Linz, Austria]"
+- "Jan David Weber^[Institute for Socio-Economics, University of Duisburg-Essen, Germany]"
+- "Bernhard Schütz^[Vienna Institute for International Economic Comparisions (wiiw)
+  and Institute for Socio-Economics, University of Duisburg-Essen, Germany]"
+- Lukas Cserjan^[Institute for Comprehensive Analysis of the Economy (ICAE), Johannes
+  Kepler University, Linz, Austria]
+---
+
+```{r packages_graphs, echo=FALSE, message=FALSE, warning=FALSE, results=FALSE}
+library(here) 
+library(tidyverse)
+library(data.table)
+library(ggplot2)
+library(dplyr)
+library(gridExtra)
+
+set.seed(1301)
+```
+
+# Import Intermediate Results
+
+Import the modified, representative data-set and prepare for visualization.
+*share_data* splits the relevant data between different building types, which 
+will be helpful in subsequent visualizations.
+
+```{r importsavings, message=FALSE, warning=FALSE, results=FALSE}
+
+immo_clean <- read.csv(file=
+              here::here('Intermediate_Results/data_clean_representative.csv'))
+
+share_data <- data.frame(
+  group = c("+", "A", "B", "C", "D", "E", "F", "G", "H"),
+  all   = immo_clean %>% group_by(efficiency_class) %>% 
+    summarise(share_effclasses=sum(renovation_weight)/
+                sum(immo_clean$renovation_weight)),
+  house = immo_clean %>% filter(type=="House") %>% 
+    group_by(efficiency_class) %>% 
+    summarise(share_effclasses=sum(renovation_weight)/ 
+                sum(immo_clean$renovation_weight[immo_clean$type=="House"])),
+  flat  = immo_clean %>% filter(type=="Apartment") %>% 
+    group_by(efficiency_class) %>%
+    summarise(share_effclasses=sum(renovation_weight)/
+                sum(immo_clean$renovation_weight[immo_clean$type=="Apartment"]))
+)
+
+share_data <- select(share_data, group, all.share_effclasses,
+                     house.share_effclasses, flat.share_effclasses)
+colnames(share_data) <- c("group", "All", "Houses" , "Apartments")
+share_data_long <- pivot_longer(share_data, cols = c(All, Houses, Apartments), 
+                                names_to = "groups", values_to = "percentage")
+
+write.csv(share_data_long, file=here::here("Results/distribution_buildings.csv"), 
+          row.names = FALSE)
+```
+
+Import climate goals as defined before:
+
+```{r importgoals, message=FALSE, warning=FALSE, results=FALSE}
+
+climate_goals <- read.csv(here::here(
+                  "Intermediate_Results/global_buildings_climate_goals2040.csv"))
+climate_goals$rate <- "Climate goal"
+```
+
+# Merge Results for Different Renovation Rates
+
+Here, we import results for different renovation rates, previously created in 
+complete_code.Rmd. At the same time, the data is reshaped to a long format and 
+the results for different renovation rates are merged. 
+This will subsequently make visualization easier.
+
+```{r mergeresults, message=FALSE, warning=FALSE, results=FALSE}
+file_names <- list.files(path = here::here("Intermediate_Results"), 
+                         pattern = "^immo_progress_\\d+(\\.\\d+)?\\.csv$",
+                            full.names = TRUE)
+
+# Create a list of data frame names
+df_list <- c()
+# Loop through each rate and import the corresponding CSV file 
+# into separate data frames
+for (file in file_names) {
+  rate <- as.numeric(gsub(".*_(\\d+(\\.\\d+)?)\\.csv", "\\1", basename(file)))
+  withoutpoint <- gsub("\\.", "", as.character(rate))
+  df_name <- paste("df_", withoutpoint, sep = "")
+  df <- read.csv(file)
+  df <- df %>% mutate(rate = rate)
+  df <- pivot_longer(df, 
+                      cols = -c(year, rate), 
+                      names_to = "Variable", 
+                      values_to = "Value")
+  assign(paste("df_", rate, sep=""), df)
+  df_list <- append(df_list, paste("df_", rate, sep=""))
+}
+
+# Combine the dataframes into a single dataframe
+df_list <- lapply(df_list, get)
+long_df <- bind_rows(df_list)
+
+write.csv(long_df, file = here::here("Results/comparing_renovation_rates.csv"), 
+                                     row.names = FALSE)
+```
+
+# Compare Results for Different Renovation Rates
+
+## Traditional Energy Mix
+
+### Plot: Prioritized Renovations and Traditional Energy Mix
+
+With this graph, we show how many GHG can be saved in a scenario with the
+prioritization of renovating the worst performing buildings and a traditional 
+energy mix.
+For reference, the graph also plots the climate goals.
+
+```{r plotprioold, message=FALSE, warning=FALSE, results=TRUE}
+filtered_data <- subset(long_df, Variable == "relative_ghg_old_prio")
+filtered_data_truncated <- subset(filtered_data, year <= 2050)
+
+colors <-  scales::hue_pal()(6)[1:6]
+line_colors <- c(colors, "red")
+
+# Create a ggplot with lines for different rates
+p1 <- ggplot(filtered_data_truncated, aes(x = year, y = Value, 
+                                          color = as.factor(rate))) +
+  geom_line(linetype="dashed") +
+  geom_line(data=climate_goals, aes(x=year, y=rel_reduction)) +
+  labs(title = "Prioritized renovations, traditional energy mix") +
+  xlab("Year") +
+  ylab("Remaining emissions in %") +
+  scale_color_manual(name = "Renovation Rate", 
+                     values = line_colors)
+  ylim(0,1.05)
+
+p1
+```
+
+### Plot: Randomized Renovations and Traditional Energy Mix
+
+Plot the scenario with random renovations and traditional energy mix for various 
+renovation rates. This graph shows how many GHG can be saved for different 
+renovation rates with random renovations and a traditional energy mix.
+For reference, the graph also plots the climate goals.
+
+```{r plotrandold, message=FALSE, warning=FALSE, results=TRUE}
+filtered_data <- subset(long_df, Variable == "relative_ghg_old_rand")
+filtered_data_truncated <- subset(filtered_data, year <= 2050)
+
+#Create a ggplot with lines for different rates
+p2 <- ggplot(filtered_data_truncated, aes(x = year, y = Value, 
+                                          color = as.factor(rate))) +
+  geom_line(linetype="dashed") +
+  geom_line(data=climate_goals, aes(x=year, y=rel_reduction)) +
+  labs(title = "Random renovations, traditional energy mix") +
+  xlab("Year") +
+  ylab("Remaining emissions in %") +
+  scale_color_manual(name = "Renovation Rate", 
+                     values = line_colors)
+  ylim(0,1.05)
+
+p2
+
+```
+
+## Neutral Energy Mix
+
+### Plot: Prioritized Renovations and Neutral Energy Mix
+
+In this graph we show how many GHG can be saved in a scenario with 
+prioritization of renovating worst performing buildings and a neutral 
+energy mix. Here, neutral is defined as having decarbonized energy provision for 
+heating pumps, while district heating is still provided as in the past.
+For reference, the graph also plots the climate goals.
+
+```{r plotprioneutral, message=FALSE, warning=FALSE, results=TRUE}
+filtered_data <- subset(long_df, Variable == "relative_ghg_neutral_prio")
+filtered_data_truncated <- subset(filtered_data, year <= 2050)
+
+colors <-  scales::hue_pal()(6)[1:6]
+line_colors <- c(colors, "red")
+
+# Create a ggplot with lines for different rates
+p3 <- ggplot(filtered_data_truncated, aes(x = year, y = Value, 
+                                          color = as.factor(rate))) +
+  geom_line(linetype="dashed") +
+  geom_line(data=climate_goals, aes(x=year, y=rel_reduction)) +
+  labs(title = "Prioritized renovations, neutral energy mix") +
+  xlab("Year") +
+  ylab("Remaining emissions in %") +
+  scale_color_manual(name = "Renovation Rate", 
+                     values = line_colors)
+  ylim(0,1.05)
+
+p3
+```
+
+### Plot: Randomized Renovations and Neutral Energy Mix
+
+Plot the scenario with random renovations and neutral energy mix for various 
+renovation rates. This graph shows how many GHG can be saved in a scenario with 
+random renovations and a neutral energy mix. Here, neutral is defined as having 
+decarbonized energy provision for heating pumps, while district heating remains 
+provided as in the past.
+For reference, the graph also plots the climate goals.
+
+```{r plotrandneutral, message=FALSE, warning=FALSE, results=TRUE}
+filtered_data <- subset(long_df, Variable == "relative_ghg_neutral_rand")
+filtered_data_truncated <- subset(filtered_data, year <= 2050)
+
+#Create a ggplot with lines for different rates
+p4 <- ggplot(filtered_data_truncated, aes(x = year, y = Value, 
+                                          color = as.factor(rate))) +
+  geom_line(linetype="dashed") +
+  geom_line(data=climate_goals, aes(x=year, y=rel_reduction)) +
+  labs(title = "Random renovations, neutral energy mix") +
+  xlab("Year") +
+  ylab("Remaining emissions in %") +
+  scale_color_manual(name = "Renovation Rate", 
+                     values = line_colors)
+  ylim(0,1.05)
+
+p4
+
+```
+
+## Fully Decarbonized Energy Mix
+
+### Plot: Prioritized Renovations and Fully Decarbonized Energy Mix
+
+With this graph we show how many GHG can be saved in a scenario with 
+prioritization of renovating worst performing buildings and a fully decarbonized 
+energy mix. Fully decarbonized is defined as having decarbonized energy 
+provision for heating pumps as well as decarbonized provision of district 
+heating.
+For reference, the graph also plots the climate goals.
+
+```{r plotpriodecarb, message=FALSE, warning=FALSE, results=TRUE}
+filtered_data <- subset(long_df, Variable == "relative_ghg_decarb_prio")
+filtered_data_truncated <- subset(filtered_data, year <= 2050)
+
+colors <-  scales::hue_pal()(6)[1:6]
+line_colors <- c(colors, "red")
+
+# Create a ggplot with lines for different rates
+p5 <- ggplot(filtered_data_truncated, aes(x = year, y = Value, 
+                                          color = as.factor(rate))) +
+  geom_line(linetype="dashed") +
+  geom_line(data=climate_goals, aes(x=year, y=rel_reduction)) +
+  labs(title = "Prioritized renovations, decarbonized energy mix") +
+  xlab("Year") +
+  ylab("Remaining emissions in %") +
+  scale_color_manual(name = "Renovation Rate", 
+                     values = line_colors)
+  ylim(0,1.05)
+
+p5
+```
+
+### Plot: Randomized Renovations and Fully Decarbonized Energy Mix
+
+With this graph we show how many GHG can be saved in a scenario with a random 
+order of renovations and a fully decarbonized energy mix. Fully decarbonized is 
+defined as having decarbonized energy provision for heating pumps as well as 
+decarbonized provision of district heating.
+For reference, the graph also plots the climate goals.
+
+```{r plotranddecarb, message=FALSE, warning=FALSE, results=TRUE}
+filtered_data <- subset(long_df, Variable == "relative_ghg_decarb_rand")
+filtered_data_truncated <- subset(filtered_data, year <= 2050)
+
+#Create a ggplot with lines for different rates
+p6 <- ggplot(filtered_data_truncated, aes(x = year, y = Value, 
+                                          color = as.factor(rate))) +
+  geom_line(linetype="dashed") +
+  geom_line(data=climate_goals, aes(x=year, y=rel_reduction)) +
+  labs(title = "Random renovations, decarbonized energy mix") +
+  xlab("Year") +
+  ylab("Remaining emissions in %") +
+  scale_color_manual(name = "Renovation Rate", 
+                     values = line_colors)
+  ylim(0,1.05)
+
+p6
+
+```
+
+
+# Supplementary Graphs
+
+## Distribution of Efficiency Classes
+
+In this graph we show the distribution of efficiency classes by building types.
+```{r efficiencyclasses, message=FALSE, warning=FALSE, results=TRUE}
+
+p7 <- ggplot(share_data_long, aes(x = group, y = percentage, fill = groups)) +
+  geom_bar(stat = "identity", position = "dodge", alpha = 0.7) +
+  labs(title = "Distribution of efficiency classes by type of building") +
+  xlab("Efficiency class") +
+  ylab("Percent") +
+  scale_fill_manual(values = c("blue", "green", "red"))+ 
+  guides(fill=guide_legend(title="Type of building:"),
+         override.aes = list(fill = c("All",
+                                      "Apartments",
+                                      "Single- and two-family buildings")))
+
+
+pdf(file = "../Graphs/plot_histogram.pdf",
+    width = 6, 
+    height = 4) 
+p7
+dev.off()
+
+```
+
+## Supplementary Graphs
+
+With these plots we show the distribution of efficiency classes for different 
+subsets of the data.
+
+[Source](https://www.bmwk.de/Redaktion/DE/Downloads/Studien/vorbereitende-untersuchungen-zur-langfristigen-renovierungsstrategie-ergaenzung.pdf?__blob=publicationFile&v=6)
+
+```{r, efficiencyclasses_supplementary, message=FALSE, warning=FALSE, results=TRUE}
+
+p8 <- ggplot(share_data, aes(x = group, y = All)) +
+  geom_bar(stat = "identity", fill = "blue", alpha = 0.7) +
+  labs(title = "All observations") +
+  xlab("Efficiency class") +
+  ylab("Percent")
+
+# Create the second histogram for Haus
+p9 <- ggplot(share_data, aes(x = group, y = Houses)) +
+  geom_bar(stat = "identity", fill = "green", alpha = 0.7) +
+  labs(title = "Single- and two-family buildings only") +
+  xlab("Efficiency class") +
+  ylab("Percent")
+
+# Create the third histogram for Wohnung
+p10 <- ggplot(share_data, aes(x = group, y = Apartments)) +
+  geom_bar(stat = "identity", fill = "red", alpha = 0.7) +
+  labs(title = "Apartments only") +
+  xlab("Efficiency class") +
+  ylab("Percent")
+
+p8
+p9
+p10
+
+```
